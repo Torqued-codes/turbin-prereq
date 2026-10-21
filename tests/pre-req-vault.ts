@@ -1,121 +1,108 @@
-import * as anchor from "@anchor-lang/core";
+﻿import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PreReqVault } from "../target/types/pre_req_vault";
 import {
-  Commitment,
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
 } from "@solana/web3.js";
-import NodeWallet from "@anchor-lang/core/dist/cjs/nodewallet";
 import { BN } from "bn.js";
 import { expect } from "chai";
 
-const commitement: Commitment = "confirmed";
-
 describe("pre-req-vault", () => {
-  const confirmTx = async (signature: string) => {
-    console.log(`Transaction signature: ${signature}`);
-    const latestBlockhash = await anchor
-      .getProvider()
-      .connection.getLatestBlockhash();
-    await anchor.getProvider().connection.confirmTransaction(
-      {
-        signature,
-        ...latestBlockhash,
-      },
-      commitement,
-    );
-  };
-
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const program = anchor.workspace.preReqVault as Program<PreReqVault>;
   const user = provider.wallet.publicKey;
 
-  // Derive PDAs
+  const [vaultStatePda, stateBump] =
+    PublicKey.findProgramAddressSync(
+      [Buffer.from("state"), user.toBuffer()],
+      program.programId,
+    );
 
-  const [vaultStatePda, stateBump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("state"), user.toBuffer()],
-    program.programId,
-  );
-
-  const [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), vaultStatePda.toBuffer()],
-    program.programId,
-  );
-
-  //   before(async () => {
-  //     const sig = await provider.connection.requestAirdrop(
-  //       user,
-  //       10 * LAMPORTS_PER_SOL,
-  //     );
-  //     await confirmTx(sig);
-  //   });
+  const [vaultPda, vaultBump] =
+    PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), vaultStatePda.toBuffer()],
+      program.programId,
+    );
 
   it("Initialize the vault", async () => {
     const tx = await program.methods
       .initialize()
       .accountsStrict({
-        user: user,
+        user,
         vaultState: vaultStatePda,
         vault: vaultPda,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
 
-    await confirmTx(tx);
+    console.log("Initialize transaction:", tx);
 
-    const vaultState = await program.account.vaultState.fetch(vaultStatePda);
+    const vaultState =
+      await program.account.vaultState.fetch(vaultStatePda);
+
     expect(vaultState.vaultBump).to.equal(vaultBump);
     expect(vaultState.stateBump).to.equal(stateBump);
   });
 
-  it(" Deposilt 1 Sol in to the vault", async () => {
-    const depositAmount = 1 * LAMPORTS_PER_SOL;
+  it("Deposit 1 SOL into the vault", async () => {
+    const depositAmount = LAMPORTS_PER_SOL;
 
-    const initialVaultBalance = await provider.connection.getBalance(vaultPda);
-    const intialUserBalance = await provider.connection.getBalance(user);
+    const initialVaultBalance =
+      await provider.connection.getBalance(vaultPda);
+    const initialUserBalance =
+      await provider.connection.getBalance(user);
 
     const tx = await program.methods
       .deposit(new BN(depositAmount))
       .accountsStrict({
-        user: user,
+        user,
         vaultState: vaultStatePda,
         vault: vaultPda,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
 
-    confirmTx(tx);
+    console.log("Deposit transaction:", tx);
 
-    const finalBalanceVault = await provider.connection.getBalance(vaultPda);
-    const finalBalanceUser = await provider.connection.getBalance(user);
+    const finalVaultBalance =
+      await provider.connection.getBalance(vaultPda);
+    const finalUserBalance =
+      await provider.connection.getBalance(user);
 
-    expect(finalBalanceVault).to.equal(initialVaultBalance + depositAmount);
-    expect(finalBalanceUser).to.be.lessThan(intialUserBalance - depositAmount);
+    expect(finalVaultBalance).to.equal(
+      initialVaultBalance + depositAmount,
+    );
+    expect(finalUserBalance).to.be.lessThan(
+      initialUserBalance - depositAmount,
+    );
   });
 
-  it(" Withdraw 0.5 Sol from the vault", async () => {
+  it("Withdraw 0.5 SOL and register the user", async () => {
     const withdrawAmount = 0.5 * LAMPORTS_PER_SOL;
 
-    const initialVaultBalance = await provider.connection.getBalance(vaultPda);
-    const intialUserBalance = await provider.connection.getBalance(user);
+    const initialVaultBalance =
+      await provider.connection.getBalance(vaultPda);
+    const initialUserBalance =
+      await provider.connection.getBalance(user);
 
     const applicationProgram = new PublicKey(
       "TRBZyQHB3m68FGeVsqTK39Wm4xejadjVhP5MAZaKWDM",
     );
 
-    const applicationAccount = PublicKey.findProgramAddressSync(
-      [Buffer.from("prereqs"), user.toBuffer()],
-      applicationProgram,
-    )[0];
+    const [applicationAccount] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("prereqs"), user.toBuffer()],
+        applicationProgram,
+      );
 
     const tx = await program.methods
       .withdraw(new BN(withdrawAmount))
       .accountsStrict({
-        user: user,
+        user,
         vaultState: vaultStatePda,
         vault: vaultPda,
         systemProgram: SystemProgram.programId,
@@ -124,38 +111,49 @@ describe("pre-req-vault", () => {
       })
       .rpc();
 
-    confirmTx(tx);
+    console.log("Withdraw and registration transaction:", tx);
 
-    const finalBalanceVault = await provider.connection.getBalance(vaultPda);
-    const finalBalanceUser = await provider.connection.getBalance(user);
+    const finalVaultBalance =
+      await provider.connection.getBalance(vaultPda);
+    const finalUserBalance =
+      await provider.connection.getBalance(user);
 
-    expect(finalBalanceVault).to.equal(initialVaultBalance - withdrawAmount);
-    expect(finalBalanceUser).to.be.greaterThan(intialUserBalance);
+    expect(finalVaultBalance).to.equal(
+      initialVaultBalance - withdrawAmount,
+    );
+    expect(finalUserBalance).to.be.greaterThan(initialUserBalance);
   });
 
-  it(" Close the vault and withdraw all the funds", async () => {
-    const initialUserBalance = await provider.connection.getBalance(user);
+  it("Close the vault and withdraw the remaining funds", async () => {
+    const initialUserBalance =
+      await provider.connection.getBalance(user);
 
     const tx = await program.methods
       .close()
       .accountsStrict({
-        user: user,
+        user,
         vaultState: vaultStatePda,
         vault: vaultPda,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
 
-    confirmTx(tx);
+    console.log("Close transaction:", tx);
 
-    expect(await provider.connection.getBalance(vaultPda)).to.equal(0);
+    const finalVaultBalance =
+      await provider.connection.getBalance(vaultPda);
 
-    const vaultStateInfo = await provider.connection.getAccountInfo(
-      vaultStatePda,
-    );
+    expect(finalVaultBalance).to.equal(0);
+
+    const vaultStateInfo =
+      await provider.connection.getAccountInfo(vaultStatePda);
+
     expect(vaultStateInfo).to.be.null;
 
-    const finalUserBalance = await provider.connection.getBalance(user);
+    const finalUserBalance =
+      await provider.connection.getBalance(user);
+
     expect(finalUserBalance).to.be.greaterThan(initialUserBalance);
   });
 });
+
